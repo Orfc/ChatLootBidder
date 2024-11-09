@@ -25,7 +25,7 @@ local me = UnitName("player")
 -- Roll tracking heavily borrowed from RollTracker: http://www.wowace.com/projects/rolltracker/
 if GetLocale() == 'deDE' then RANDOM_ROLL_RESULT = "%s w\195\188rfelt. Ergebnis: %d (%d-%d)"
 elseif RANDOM_ROLL_RESULT == nil then RANDOM_ROLL_RESULT = "%s rolls %d (%d-%d)" end -- Using english language https://vanilla-wow-archive.fandom.com/wiki/WoW_constants if not set
-local rollRegex = string.gsub(string.gsub(string.gsub("%s rolls %d (%d-%d)", "([%(%)%-])", "%%%1"), "%%s", "%(.+%)"), "%%d", "%(%%d+%)")
+local rollRegex = string.gsub(string.gsub(string.gsub("%s rolls %d (%d-%d)", "([%(%)%-])", "%%%1"), "%%s", "%%(.+%)"), "%%d", "%%(%%d+%)")
 
 ChatLootBidder_ChatFrame_OnEvent = ChatFrame_OnEvent
 
@@ -96,6 +96,25 @@ local function Trace(message)
 	if ChatLootBidder_Store.DebugLevel > 1 then
 		DEFAULT_CHAT_FRAME:AddMessage("|cffbe5eff".. chatPrefix .."|cffffff00 "..message)
 	end
+end
+
+-- Add this near the top with other helper functions
+local function RoundUpToTen(number)
+  return math.ceil(number / 10) * 10
+end
+
+-- Add helper function to get highest bid for a tier
+local function GetHighestBid(itemSession, tier)
+  local highest = ChatLootBidder_Store.MinBid - 1  -- Start below MinBid so first valid bid is accepted
+  local bids = itemSession[tier]
+  if bids then
+    for _, bid in pairs(bids) do
+      if tonumber(bid) > highest then
+        highest = tonumber(bid)
+      end
+    end
+  end
+  return highest
 end
 
 function ChatLootBidder:SetPropValue(propName, propValue, prefix)
@@ -351,149 +370,266 @@ local function HandleSrRemove(bidder, item)
   end
 end
 
-local function BidSummary(announceWinners)
-  if session == nil then
-    Error("There is no existing session")
-    return
+local function BidSummary(item, announceWinners)
+  if not item or not session or not session[item] then
+    Debug("BidSummary called with invalid item or session")
+    return {}
   end
-  local summaries = {}
-  for item,itemSession in pairs(session) do
-    local sr = itemSession["sr"] or {}
-    local ms = itemSession["ms"] or {}
-    local ofs = itemSession["os"] or {}
-    local roll = itemSession["roll"]
-    local cancel = itemSession["cancel"] or {}
-    local notes = itemSession["notes"] or {}
-    local needsRoll = IsTableEmpty(sr) and IsTableEmpty(ms) and IsTableEmpty(ofs)
-    if announceWinners and needsRoll then
-      for bidder,r in roll do
-        if r == -1 then
-          r = Roll()
-          roll[bidder] = r
-          if ChatLootBidder_Store.RollAnnounce then
-            MessageStartChannel(PlayerWithClassColor(bidder) .. " rolls " .. r .. " (1-100) for " .. item)
-          else
-            SendResponse("You roll " .. r .. " (1-100) for " .. item, bidder)
-          end
-        end
-      end
-    end
-    local winner = {}
-    local winnerBid = nil
-    local winnerTier = nil
-    local header = true
-    local summary = {}
-    if not IsTableEmpty(sr) then
-      local sortedMainspecKeys = GetKeysSortedByValue(sr)
-      for k,bidder in pairs(sortedMainspecKeys) do
-        if IsTableEmpty(winner) then table.insert(summary, item) end
-        if header then table.insert(summary, "- Soft Reserve:"); header = false end
-        local bid = sr[bidder]
-        if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "sr"
-        elseif not IsTableEmpty(winner) and winnerTier == "sr" and winnerBid == bid then table.insert(winner, bidder) end
-        table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. bid)
-      end
-    end
-    header = true
-    if not IsTableEmpty(ms) then
-      local sortedMainspecKeys = GetKeysSortedByValue(ms)
-      for k,bidder in pairs(sortedMainspecKeys) do
+
+  local itemSession = session[item]
+  local summary = {}
+  local mainWinner = {}
+  local mainWinnerBid = 0
+  local mainWinnerTier = nil
+  local cancel = itemSession["cancel"] or {}
+  local notes = itemSession["notes"] or {}
+
+  -- Add separator before any rolls
+  if announceWinners and (
+    (not IsTableEmpty(itemSession["ms"])) or 
+    (not IsTableEmpty(itemSession["os"])) or 
+    (not IsTableEmpty(itemSession["tmog"])) or 
+    (not IsTableEmpty(itemSession["stock"]))
+  ) then
+    MessageStartChannel("---------------")
+  end
+
+  -- Process main bids first
+  header = true
+  if sessionMode == "DKP" then
+    -- Handle DKP bids
+    if not IsTableEmpty(itemSession["bid"]) then
+      local sortedBidKeys = GetKeysSortedByValue(itemSession["bid"])
+      for k,bidder in pairs(sortedBidKeys) do
         if cancel[bidder] == nil then
-          if IsTableEmpty(winner) then table.insert(summary, item) end
-          if header then table.insert(summary, "- Main Spec:"); header = false end
-          local bid = ms[bidder]
-          if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "ms"
-          elseif not IsTableEmpty(winner) and winnerTier == "ms" and winnerBid == bid then table.insert(winner, bidder) end
-          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. bid .. AppendNote(notes[bidder]))
-        end
-      end
-    end
-    header = true
-    if not IsTableEmpty(ofs) then
-      local sortedOffspecKeys = GetKeysSortedByValue(ofs)
-      for k,bidder in pairs(sortedOffspecKeys) do
-        if cancel[bidder] == nil and ms[bidder] == nil then
-          if IsTableEmpty(winner) then table.insert(summary, item) end
-          if header then table.insert(summary, "- Off Spec:"); header = false end
-          local bid = ofs[bidder]
-          if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "os"
-          elseif not IsTableEmpty(winner) and winnerTier == "os" and winnerBid == bid then table.insert(winner, bidder) end
-          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. bid .. AppendNote(notes[bidder]))
-        end
-      end
-    end
-    header = true
-    if not IsTableEmpty(roll) then
-      local sortedRollKeys = GetKeysSortedByValue(roll)
-      for k,bidder in pairs(sortedRollKeys) do
-        if cancel[bidder] == nil and ms[bidder] == nil and ofs[bidder] == nil then
-          if IsTableEmpty(winner) then table.insert(summary, item) end
-          if header then table.insert(summary, "- Rolls:"); header = false end
-          local bid = roll[bidder]
-          if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "roll"
-          elseif not IsTableEmpty(winner) and winnerTier == "roll" and winnerBid == bid then table.insert(winner, bidder) end
-          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. bid .. AppendNote(notes[bidder]))
-        end
-      end
-    end
-    local breakTies = ChatLootBidder_Store.BreakTies or sessionMode ~= "DKP"
-    if getn(winner) > 1 then
-      if sessionMode == "DKP" then
-        MessageWinnerChannel(table.concat(winner, ", ") .. " tied with a ".. string.upper(winnerTier) .. " bid of " .. winnerBid .. ", rolling it off:")
-      else
-        MessageWinnerChannel(table.concat(winner, ", ") .. " bid ".. string.upper(winnerTier) ..", rolling it off:")
-      end
-      while getn(winner) > 1 and breakTies do
-        local winningRoll = 0
-        for _,bidder in winner do
-          local r = roll[bidder]
-          if r == -1 or r == nil then
-            r = Roll()
-            roll[bidder] = r
-            MessageWinnerChannel(PlayerWithClassColor(bidder) .. " rolls " .. r .. " (1-100) for " .. item)
-          else
-            r = roll[bidder]
-            MessageWinnerChannel(PlayerWithClassColor(bidder) .. " already rolled " .. r .. " (1-100) for " .. item)
+          if IsTableEmpty(mainWinner) then 
+            table.insert(mainWinner, bidder)
+            mainWinnerBid = itemSession["bid"][bidder]
+            mainWinnerTier = "bid"
+          elseif not IsTableEmpty(mainWinner) and mainWinnerTier == "bid" and mainWinnerBid == itemSession["bid"][bidder] then 
+            table.insert(mainWinner, bidder)
           end
-          if winningRoll < r then winningRoll = r end
+          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. itemSession["bid"][bidder] .. AppendNote(notes[bidder] or ""))
         end
-        local newWinner = {}
-        for _,bidder in winner do
-          if roll[bidder] == winningRoll then
-            table.insert(newWinner, bidder)
+      end
+    else
+      -- Handle MS/OS rolls if no DKP bids
+      if not IsTableEmpty(itemSession["ms"]) then
+        -- Roll for any unrolled MS bidders
+        for bidder, _ in pairs(itemSession["ms"]) do
+          if cancel[bidder] == nil and (itemSession["roll"][bidder] == nil or itemSession["roll"][bidder] == -1) then
+            itemSession["roll"][bidder] = math.random(1, 100)
+            MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for MS")
           end
-          roll[bidder] = -1
         end
-        winner = newWinner
+        
+        -- Find highest roller(s)
+        local highestRoll = 0
+        for bidder, _ in pairs(itemSession["ms"]) do
+          if cancel[bidder] == nil then
+            if itemSession["roll"][bidder] > highestRoll then
+              highestRoll = itemSession["roll"][bidder]
+              mainWinner = {bidder}
+              mainWinnerTier = "ms"
+            elseif itemSession["roll"][bidder] == highestRoll then
+              table.insert(mainWinner, bidder)
+            end
+            table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": MS (" .. itemSession["roll"][bidder] .. ")" .. AppendNote(notes[bidder] or ""))
+          end
+        end
+      end
+      
+      if IsTableEmpty(mainWinner) and not IsTableEmpty(itemSession["os"]) then
+        -- Roll for any unrolled OS bidders
+        for bidder, _ in pairs(itemSession["os"]) do
+          if cancel[bidder] == nil and (itemSession["roll"][bidder] == nil or itemSession["roll"][bidder] == -1) then
+            itemSession["roll"][bidder] = math.random(1, 100)
+            MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for OS")
+          end
+        end
+        
+        -- Find highest roller(s)
+        local highestRoll = 0
+        for bidder, _ in pairs(itemSession["os"]) do
+          if cancel[bidder] == nil then
+            if itemSession["roll"][bidder] > highestRoll then
+              highestRoll = itemSession["roll"][bidder]
+              mainWinner = {bidder}
+              mainWinnerTier = "os"
+            elseif itemSession["roll"][bidder] == highestRoll then
+              table.insert(mainWinner, bidder)
+            end
+            table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": OS (" .. itemSession["roll"][bidder] .. ")" .. AppendNote(notes[bidder] or ""))
+          end
+        end
       end
     end
-    if IsTableEmpty(winner) then
-      if announceWinners then MessageStartChannel("No bids received for " .. item) end
-      table.insert(summary, item .. ": No Bids")
-    elseif announceWinners then
-      local winnerMessage = table.concat(winner, ", ") .. (getn(winner) > 1 and " tie for " or " wins ") .. item
-      if sessionMode == "DKP" then
-        winnerMessage = winnerMessage .. " with a " .. (winnerTier == "roll" and "roll of " or (string.upper(winnerTier) .. " bid of ")) .. winnerBid
-      else
-        winnerMessage = winnerMessage .. " for " .. string.upper(winnerTier)
+  else
+    -- MSOS mode - use the same roll handling as DKP mode
+    if not IsTableEmpty(itemSession["ms"]) then
+      -- Roll for any unrolled MS bidders
+      for bidder, _ in pairs(itemSession["ms"]) do
+        if cancel[bidder] == nil and (itemSession["roll"][bidder] == nil or itemSession["roll"][bidder] == -1) then
+          itemSession["roll"][bidder] = math.random(1, 100)
+          MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for MS")
+        end
       end
-      MessageWinnerChannel(winnerMessage)
+      
+      -- Find highest roller(s)
+      local highestRoll = 0
+      for bidder, _ in pairs(itemSession["ms"]) do
+        if cancel[bidder] == nil then
+          if itemSession["roll"][bidder] > highestRoll then
+            highestRoll = itemSession["roll"][bidder]
+            mainWinner = {bidder}
+            mainWinnerTier = "ms"
+          elseif itemSession["roll"][bidder] == highestRoll then
+            table.insert(mainWinner, bidder)
+          end
+          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": MS (" .. itemSession["roll"][bidder] .. ")" .. AppendNote(notes[bidder] or ""))
+        end
+      end
     end
-    table.insert(summaries, summary)
-    if winnerTier == "sr" and ChatLootBidder_Store.DefaultAutoRemoveSrAfterWin then
-      HandleSrRemove(winner[1], item)
+    
+    if IsTableEmpty(mainWinner) and not IsTableEmpty(itemSession["os"]) then
+      -- Roll for any unrolled OS bidders
+      for bidder, _ in pairs(itemSession["os"]) do
+        if cancel[bidder] == nil and (itemSession["roll"][bidder] == nil or itemSession["roll"][bidder] == -1) then
+          itemSession["roll"][bidder] = math.random(1, 100)
+          MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for OS")
+        end
+      end
+      
+      -- Find highest roller(s)
+      local highestRoll = 0
+      for bidder, _ in pairs(itemSession["os"]) do
+        if cancel[bidder] == nil then
+          if itemSession["roll"][bidder] > highestRoll then
+            highestRoll = itemSession["roll"][bidder]
+            mainWinner = {bidder}
+            mainWinnerTier = "os"
+          elseif itemSession["roll"][bidder] == highestRoll then
+            table.insert(mainWinner, bidder)
+          end
+          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": OS (" .. itemSession["roll"][bidder] .. ")" .. AppendNote(notes[bidder] or ""))
+        end
+      end
     end
   end
-  for _,summary in summaries do
-    for _,line in summary do
-      MessageBidSummaryChannel(line)
+
+  -- Process tmog bids
+  if not IsTableEmpty(itemSession["tmog"]) then
+    local tmogBidders = {}
+    -- Roll for any unrolled tmog bidders
+    for bidder, _ in pairs(itemSession["tmog"]) do
+      if cancel[bidder] == nil and (itemSession["roll"][bidder] == nil or itemSession["roll"][bidder] == -1) then
+        itemSession["roll"][bidder] = math.random(1, 100)
+        MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for TMOG")
+      end
+    end
+
+    -- Add separator before any rolls
+    MessageStartChannel("---------------")
+    
+    -- Find highest roller(s)
+    local highestRoll = 0
+    local tmogWinners = {}
+    for bidder, _ in pairs(itemSession["tmog"]) do
+      if cancel[bidder] == nil then
+        if itemSession["roll"][bidder] > highestRoll then
+          highestRoll = itemSession["roll"][bidder]
+          tmogWinners = {bidder}
+        elseif itemSession["roll"][bidder] == highestRoll then
+          table.insert(tmogWinners, bidder)
+        end
+        table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": TMOG (" .. itemSession["roll"][bidder] .. ")" .. AppendNote(notes[bidder] or ""))
+      end
+    end
+    
+    if not IsTableEmpty(tmogWinners) then
+      if announceWinners then
+        local winnerMessage = table.concat(tmogWinners, ", ") .. (getn(tmogWinners) > 1 and " tie for " or " wins ") .. item .. " for TMOG with a roll of " .. highestRoll
+        MessageWinnerChannel(winnerMessage)
+      end
     end
   end
+
+  -- Process stock bids
+  if not IsTableEmpty(itemSession["stock"]) then
+    local stockBidders = {}
+    -- In DKP mode, only process stock if there are no DKP bids
+    -- In either mode, only process stock if there are no MS/OS bids
+    if (sessionMode == "DKP" and not IsTableEmpty(itemSession["bid"])) or
+       not IsTableEmpty(itemSession["ms"]) or 
+       not IsTableEmpty(itemSession["os"]) then
+      -- Skip stock bids if there are higher priority bids
+    else
+      -- Roll for any unrolled stock bidders
+      for bidder, _ in pairs(itemSession["stock"]) do
+        if cancel[bidder] == nil and (itemSession["roll"][bidder] == nil or itemSession["roll"][bidder] == -1) then
+          itemSession["roll"][bidder] = math.random(1, 100)
+          MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for STOCK")
+        end
+      end
+
+      -- Find highest roller(s)
+      local highestRoll = 0
+      for bidder, _ in pairs(itemSession["stock"]) do
+        if cancel[bidder] == nil then
+          if itemSession["roll"][bidder] > highestRoll then
+            highestRoll = itemSession["roll"][bidder]
+            stockBidders = {bidder}
+          elseif itemSession["roll"][bidder] == highestRoll then
+            table.insert(stockBidders, bidder)
+          end
+          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": STOCK (" .. itemSession["roll"][bidder] .. ")" .. AppendNote(notes[bidder] or ""))
+        end
+      end
+
+      if not IsTableEmpty(stockBidders) then
+        if announceWinners then
+          local winnerMessage = table.concat(stockBidders, ", ") .. (getn(stockBidders) > 1 and " tie for " or " wins ") .. item .. " for STOCK with a roll of " .. highestRoll
+          MessageWinnerChannel(winnerMessage)
+        end
+      end
+    end
+  end
+
+  -- Only announce "No bids" if there were no bids of any type
+  if IsTableEmpty(mainWinner) and IsTableEmpty(itemSession["tmog"]) and IsTableEmpty(itemSession["stock"]) then
+    if announceWinners then MessageStartChannel("No bids received for " .. item) end
+    table.insert(summary, item .. ": No Bids")
+  elseif announceWinners and not IsTableEmpty(mainWinner) then
+    local winnerMessage = table.concat(mainWinner, ", ") .. (getn(mainWinner) > 1 and " tie for " or " wins ") .. item
+    if sessionMode == "DKP" and mainWinnerTier == "bid" then
+      winnerMessage = winnerMessage .. " with a bid of " .. mainWinnerBid .. " DKP"
+    else
+      -- Add roll type to announcement for MS/OS/STOCK
+      if mainWinnerTier then
+        winnerMessage = winnerMessage .. " for " .. string.upper(mainWinnerTier)
+        -- Add roll value for MS/OS/STOCK
+        if itemSession["roll"][mainWinner[1]] then
+          winnerMessage = winnerMessage .. " with a roll of " .. itemSession["roll"][mainWinner[1]]
+        end
+      end
+    end
+    MessageWinnerChannel(winnerMessage)
+  end
+
+  return summary
 end
 
 function ChatLootBidder:End()
   ChatThrottleLib:SendAddonMessage("BULK", "NotChatLootBidder", "endSession=1", "RAID")
-  BidSummary(true)
+  
+  -- Process each item in the session
+  if session then
+    for item, itemSession in pairs(session) do
+      -- Pass true to announce winners, but don't display the summary
+      BidSummary(item, true)
+    end
+  end
+  
   session = nil
   sessionMode = nil
   stage = nil
@@ -551,8 +687,16 @@ function ChatLootBidder:Start(items, timer, mode)
       exampleItem = i
       table.insert(startChannelMessage, i)
       bidAddonMessage = bidAddonMessage .. string.gsub(i, ",", "~~~")
-      session[i]["ms"] = {}
-      session[i]["os"] = {}
+      if sessionMode == "DKP" then
+        session[i]["bid"] = {}  -- Initialize bid table for DKP mode
+        session[i]["ms"] = {}   -- Also initialize MS/OS tables for rolls
+        session[i]["os"] = {}
+      else
+        session[i]["ms"] = {}   -- Initialize MS/OS tables for MSOS mode
+        session[i]["os"] = {}
+      end
+      session[i]["tmog"] = {}   -- Initialize tmog table for all modes
+      session[i]["stock"] = {}  -- Initialize stock table for all modes
       session[i]["roll"] = {}
       session[i]["cancel"] = {}
       session[i]["notes"] = {}
@@ -573,7 +717,11 @@ function ChatLootBidder:Start(items, timer, mode)
   end
   table.insert(startChannelMessage, "-----------")
   if exampleItem then
-    table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " ms/os/roll" .. (mode == "DKP" and " #bid" or "") .. " [optional-note]")
+    if mode == "DKP" then
+      table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " bid [dkp-amount]")
+      table.insert(startChannelMessage, "or")
+    end
+    table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " ms/os/tmog/stock")
     local l
     for _, l in pairs(startChannelMessage) do
       MessageStartChannel(l)
@@ -734,7 +882,7 @@ local function HandleChannel(prop, channel)
   if IsStaticChannel(channel) then channel = string.upper(channel) end
   ChatLootBidder_Store[prop] = channel
   Message(T[prop] .. " announce channel set to " .. channel)
-  getglobal("ChatLootBidderOptionsFrame" .. prop):SetValue(channel)
+  getglobal("ChatLootBidderOptionsFrame"..prop):SetValue(channel)
 end
 
 function ChatLootBidder:HandleEncoding(encodingType)
@@ -882,12 +1030,15 @@ local function LoadValues()
 end
 
 local function IsValidTier(tier)
-  return tier == "ms" or tier == "os" or tier == "roll" or tier == "cancel"
+  return tier == "bid" or tier == "ms" or tier == "os" or tier == "tmog" or tier == "stock" or tier == "cancel"
 end
 
 local function InvalidBidSyntax(item)
-  local bidExample = " " .. (ChatLootBidder_Store.MinBid + 9)
-  return "Invalid bid syntax for " .. item .. ".  The proper format is: '[item-link] ms" .. (sessionMode == "DKP" and bidExample or "") .. "' or '[item-link] os" .. (sessionMode == "DKP" and bidExample or "") .. "' or '[item-link] roll'"
+  if sessionMode == "DKP" then
+    return "Invalid bid syntax for " .. item .. ". Format: '[item-link] bid " .. (ChatLootBidder_Store.MinBid + 9) .. "' or '[item-link] ms/os/tmog/stock'"
+  else
+    return "Invalid bid syntax for " .. item .. ". Format: '[item-link] ms' or '[item-link] os' or '[item-link] tmog' or '[item-link] stock'"
+  end
 end
 
 local function of(amt)
@@ -966,6 +1117,21 @@ function ChatFrame_OnEvent(event)
   local items, itemIndexEnd = GetItemLinks(arg1)
   local item = items[1]
 
+  -- Get the single item from the session if there is only one
+  local singleItem = nil
+  if session then
+    local itemCount = 0
+    for item, _ in pairs(session) do
+      itemCount = itemCount + 1
+      if itemCount == 1 then
+        singleItem = item
+      elseif itemCount > 1 then
+        singleItem = nil
+        break
+      end
+    end
+  end
+
   -- Handle SR Bids
   local commandlist = SplitBySpace(arg1)
   if (softReserveSessionName ~= nil and string.lower(commandlist[1] or "") == "sr") then
@@ -993,14 +1159,30 @@ function ChatFrame_OnEvent(event)
       HandleSrAdd(bidder, table.concat(commandlist, " "))
     end
     HandleSrQuery(bidder)
-  -- Ignore all other whispers unless there is an active loot session and there is an item link in the whisper
-  elseif session ~= nil and item ~= nil then
+  -- Check for bids with or without item link
+  elseif session ~= nil and (item ~= nil or singleItem ~= nil) then
+    -- If no item linked but there's only one item in session, check for valid bid type
+    if item == nil and singleItem then
+      local firstWord = string.lower(commandlist[1] or "")
+      if firstWord == "bid" or firstWord == "ms" or firstWord == "os" or firstWord == "tmog" or firstWord == "stock" then
+        item = singleItem
+        -- Reconstruct the bid part more safely
+        if commandlist[2] then
+          arg1 = firstWord .. " " .. commandlist[2]
+        else
+          arg1 = firstWord
+        end
+        itemIndexEnd = 0
+      end
+    end
+
     local itemSession = session[item]
     if itemSession == nil then
-      local invalidBid = "There is no active loot session for " .. item
+      local invalidBid = "There is no active loot session for " .. (item or "that item")
       SendResponse(invalidBid, bidder)
       return
     end
+    
     if not IsInRaid(arg2) then
       local invalidBid = "You must be in the raid to send a bid on " .. item
       SendResponse(invalidBid, bidder)
@@ -1017,74 +1199,70 @@ function ChatFrame_OnEvent(event)
     local amt = bid[2] and string.lower(bid[2]) or nil
 
     if IsValidTier(tier) then
-      amt = ToWholeNumber(amt)
-    elseif IsValidTier(amt) then
-      -- The bidder mixed up the ms ## to ## ms, handle the mixup
-      local oldTier = tier
-      tier = amt;
-      amt = ToWholeNumber(oldTier)
+      -- Validate bid tier based on mode
+      if tier == "bid" then
+        if sessionMode ~= "DKP" then
+          SendResponse("Invalid bid type for MSOS mode. Format: '[item-link] ms' or '[item-link] os' or '[item-link] tmog' or '[item-link] stock'", bidder)
+          return
+        end
+        -- Process DKP bid
+        local numAmt = tonumber(amt)
+        if numAmt == nil or numAmt < ChatLootBidder_Store.MinBid then
+          SendResponse(InvalidBidSyntax(item), bidder)
+          return
+        end
+        if numAmt > ChatLootBidder_Store.MaxBid then
+          SendResponse("Your bid of " .. numAmt .. " exceeds the maximum bid of " .. ChatLootBidder_Store.MaxBid, bidder)
+          return
+        end
+        if itemSession["bid"][bidder] and itemSession["bid"][bidder] >= numAmt then
+          SendResponse("Your current bid of " .. itemSession["bid"][bidder] .. " is higher than " .. numAmt, bidder)
+          return
+        end
+        itemSession["bid"][bidder] = numAmt
+        received = PlayerWithClassColor(bidder) .. " bid " .. numAmt .. " DKP for " .. item .. AppendNote(notes[bidder] or "")
+      elseif tier == "ms" then
+        mainSpec[bidder] = 1
+        roll[bidder] = roll[bidder] or -1
+        received = PlayerWithClassColor(bidder) .. " bid Main Spec for " .. item .. AppendNote(notes[bidder] or "")
+      elseif tier == "os" then
+        offSpec[bidder] = 1
+        roll[bidder] = roll[bidder] or -1
+        received = PlayerWithClassColor(bidder) .. " bid Off Spec for " .. item .. AppendNote(notes[bidder] or "")
+      elseif tier == "tmog" then
+        if itemSession["ms"] and itemSession["ms"][bidder] then
+          SendResponse("You already have a Main Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
+          return
+        elseif itemSession["os"] and itemSession["os"][bidder] then
+          SendResponse("You already have an Off Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
+          return
+        end
+        itemSession["tmog"][bidder] = 1
+        roll[bidder] = roll[bidder] or -1
+        received = PlayerWithClassColor(bidder) .. " bid Transmog for " .. item .. AppendNote(notes[bidder] or "")
+      elseif tier == "stock" then
+        if itemSession["ms"] and itemSession["ms"][bidder] then
+          SendResponse("You already have a Main Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
+          return
+        elseif itemSession["os"] and itemSession["os"][bidder] then
+          SendResponse("You already have an Off Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
+          return
+        end
+        itemSession["stock"][bidder] = 1
+        roll[bidder] = roll[bidder] or -1
+        received = PlayerWithClassColor(bidder) .. " bid Stock for " .. item .. AppendNote(notes[bidder] or "")
+      elseif tier == "cancel" then
+        cancel[bidder] = true
+        received = PlayerWithClassColor(bidder) .. " cancelled their bid for " .. item
+      end
+
+      -- Send response to bidder and announce bid
+      MessageBidChannel(received)
+      return
     else
       SendResponse(InvalidBidSyntax(item), bidder)
       return
     end
-    if tier == "cancel" then
-      local cancelBid = "Bid canceled for " .. item
-      cancel[bidder] = true
-      mainSpec[bidder] = nil
-      offSpec[bidder] = nil
-      notes[bidder] = nil
-      MessageBidChannel("<" .. PlayerWithClassColor(bidder) .. "> " .. cancelBid)
-      SendResponse(cancelBid, bidder)
-      return
-    end
-    if amt > ChatLootBidder_Store.MaxBid then
-      local invalidBid = "Bid for " .. item .. " is too large, the maxiumum accepted bid is: " .. ChatLootBidder_Store.MaxBid
-      SendResponse(invalidBid, bidder)
-      return
-    end
-    -- If they had previously canceled, remove them and allow the new bid to continue
-    cancel[bidder] = nil
-    if tier == "roll" then
-      if roll[bidder] ~= nil and roll[bidder] ~= -1 then
-        SendResponse("Your roll of " .. roll[bidder] .. " has already been recorded", bidder)
-        return
-      end
-    elseif sessionMode == "DKP" then
-      if amt < ChatLootBidder_Store.MinBid then
-        SendResponse(InvalidBidSyntax(item), bidder)
-        return
-      end
-      -- remove amount from the table for note concat
-      table.remove(bid, 2)
-    else
-      amt = 1
-    end
-    -- remove tier from the table for note concat
-    table.remove(bid, 1)
-    local note = table.concat(bid, " ")
-    notes[bidder] = note
-    local received
-    if tier == "ms" then
-      mainSpec[bidder] = amt
-      if sessionMode == "MSOS" then roll[bidder] = roll[bidder] or -1 end
-      received = "Main Spec bid" .. of(amt) .. " received for " .. item .. AppendNote(note)
-    elseif mainSpec[bidder] ~= nil then
-      SendResponse("You already have a MS bid" .. of(mainSpec[bidder]) .. " recorded. Use '[item-link] cancel' to cancel your current MS bid.", bidder)
-      return
-    elseif tier == "os" then
-      offSpec[bidder] = amt
-      if sessionMode == "MSOS" then roll[bidder] = roll[bidder] or -1 end
-      received = "Off Spec bid" .. of(amt) .. " received for " .. item .. AppendNote(note)
-    elseif offSpec[bidder] ~= nil then
-      SendResponse("You already have an OS bid" .. of(offSpec[bidder]) .. " recorded. Use '[item-link] cancel' to cancel your current MS bid.", bidder)
-      return
-    elseif tier == "roll" then
-      roll[bidder] = -1
-      received = "Your roll bid for " .. item .. " has been received" .. AppendNote(note) .. ".  '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session."
-    end
-    MessageBidChannel("<" .. PlayerWithClassColor(bidder) .. "> " .. tier .. ((sessionMode == "MSOS" or amt == nil or tier == "roll") and "" or (" " .. amt)))
-    SendResponse(received, bidder)
-    return
   else
     ChatLootBidder_ChatFrame_OnEvent(event)
   end
@@ -1171,7 +1349,7 @@ function ChatLootBidder.CHAT_MSG_SYSTEM(msg)
     elseif sessionMode == "DKP" then
       SendResponse("Ignoring your roll of " .. roll .. ". You must first declare that you are rolling on an item first: '/w " .. me .. " [item-link] roll'", name)
     else
-      SendResponse("Ignoring your roll of " .. roll .. ". You must bid on an item before rolling on it: '/w " .. me .. " [item-link] ms/os/roll'", name)
+      SendResponse("Ignoring your roll of " .. roll .. ". You must bid on an item before rolling on it: '/w " .. me .. " [item-link] ms/os/tmog/stock'", name)
     end
 	end
 end
