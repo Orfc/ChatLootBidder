@@ -103,6 +103,31 @@ local function RoundUpToTen(number)
   return math.ceil(number / 10) * 10
 end
 
+-- Add this helper function near the top with other helper functions
+local function ClearOtherBids(itemSession, bidder, keepType)
+  Debug("ClearOtherBids called for " .. bidder .. ", keeping " .. (keepType or "nil"))
+  
+  if not itemSession then
+    Debug("No itemSession provided")
+    return
+  end
+  
+  if keepType == "bid" then 
+    Debug("Keeping bid type - no clearing needed")
+    return 
+  end
+  
+  local bidTypes = {"ms", "os", "tmog", "stock"}
+  for _, bidType in pairs(bidTypes) do
+    if bidType ~= keepType then
+      if itemSession[bidType] and itemSession[bidType][bidder] then
+        Debug("Clearing " .. bidType .. " bid for " .. bidder)
+        itemSession[bidType][bidder] = nil
+      end
+    end
+  end
+end
+
 -- Add helper function to get highest bid for a tier
 local function GetHighestBid(itemSession, tier)
   local highest = ChatLootBidder_Store.MinBid - 1  -- Start below MinBid so first valid bid is accepted
@@ -1199,6 +1224,8 @@ function ChatFrame_OnEvent(event)
     local amt = bid[2] and string.lower(bid[2]) or nil
 
     if IsValidTier(tier) then
+      Debug("Processing valid tier: " .. tier .. " from " .. bidder)
+      
       -- Validate bid tier based on mode
       if tier == "bid" then
         if sessionMode ~= "DKP" then
@@ -1211,46 +1238,102 @@ function ChatFrame_OnEvent(event)
           SendResponse(InvalidBidSyntax(item), bidder)
           return
         end
+
+        -- Round up to nearest 10
+        numAmt = RoundUpToTen(numAmt)
+
+        -- Check if bid exceeds maximum
         if numAmt > ChatLootBidder_Store.MaxBid then
           SendResponse("Your bid of " .. numAmt .. " exceeds the maximum bid of " .. ChatLootBidder_Store.MaxBid, bidder)
           return
         end
+
+        -- Find current highest bid
+        local highestBid = ChatLootBidder_Store.MinBid
+        for _, existingBid in pairs(itemSession["bid"] or {}) do
+          if tonumber(existingBid) > highestBid then
+            highestBid = tonumber(existingBid)
+          end
+        end
+
+        -- Check if bid is higher than highest bid
+        if numAmt <= highestBid then
+          SendResponse("Your bid must be higher than the current highest bid of " .. highestBid .. " DKP", bidder)
+          return
+        end
+
+        -- Check if bid is higher than player's current bid
         if itemSession["bid"][bidder] and itemSession["bid"][bidder] >= numAmt then
           SendResponse("Your current bid of " .. itemSession["bid"][bidder] .. " is higher than " .. numAmt, bidder)
           return
         end
+
+        -- Clear any existing non-DKP bids when placing a DKP bid
+        if itemSession["ms"] then itemSession["ms"][bidder] = nil end
+        if itemSession["os"] then itemSession["os"][bidder] = nil end
+        if itemSession["tmog"] then itemSession["tmog"][bidder] = nil end
+        if itemSession["stock"] then itemSession["stock"][bidder] = nil end
+        if itemSession["roll"] then itemSession["roll"][bidder] = nil end
+
         itemSession["bid"][bidder] = numAmt
         received = PlayerWithClassColor(bidder) .. " bid " .. numAmt .. " DKP for " .. item .. AppendNote(notes[bidder] or "")
+
       elseif tier == "ms" then
+        if itemSession["bid"] and itemSession["bid"][bidder] then
+          SendResponse("You already have a DKP bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid first.", bidder)
+          return
+        end
+        -- Clear other non-DKP bids when placing MS bid
+        if itemSession["os"] then itemSession["os"][bidder] = nil end
+        if itemSession["tmog"] then itemSession["tmog"][bidder] = nil end
+        if itemSession["stock"] then itemSession["stock"][bidder] = nil end
+        
         mainSpec[bidder] = 1
         roll[bidder] = roll[bidder] or -1
         received = PlayerWithClassColor(bidder) .. " bid Main Spec for " .. item .. AppendNote(notes[bidder] or "")
+
       elseif tier == "os" then
+        if itemSession["bid"] and itemSession["bid"][bidder] then
+          SendResponse("You already have a DKP bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid first.", bidder)
+          return
+        end
+        -- Clear other non-DKP bids when placing OS bid
+        if itemSession["ms"] then itemSession["ms"][bidder] = nil end
+        if itemSession["tmog"] then itemSession["tmog"][bidder] = nil end
+        if itemSession["stock"] then itemSession["stock"][bidder] = nil end
+        
         offSpec[bidder] = 1
         roll[bidder] = roll[bidder] or -1
         received = PlayerWithClassColor(bidder) .. " bid Off Spec for " .. item .. AppendNote(notes[bidder] or "")
+
       elseif tier == "tmog" then
-        if itemSession["ms"] and itemSession["ms"][bidder] then
-          SendResponse("You already have a Main Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
-          return
-        elseif itemSession["os"] and itemSession["os"][bidder] then
-          SendResponse("You already have an Off Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
+        if itemSession["bid"] and itemSession["bid"][bidder] then
+          SendResponse("You already have a DKP bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid first.", bidder)
           return
         end
+        -- Clear other non-DKP bids when placing TMOG bid
+        if itemSession["ms"] then itemSession["ms"][bidder] = nil end
+        if itemSession["os"] then itemSession["os"][bidder] = nil end
+        if itemSession["stock"] then itemSession["stock"][bidder] = nil end
+        
         itemSession["tmog"][bidder] = 1
         roll[bidder] = roll[bidder] or -1
         received = PlayerWithClassColor(bidder) .. " bid Transmog for " .. item .. AppendNote(notes[bidder] or "")
+
       elseif tier == "stock" then
-        if itemSession["ms"] and itemSession["ms"][bidder] then
-          SendResponse("You already have a Main Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
-          return
-        elseif itemSession["os"] and itemSession["os"][bidder] then
-          SendResponse("You already have an Off Spec bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid.", bidder)
+        if itemSession["bid"] and itemSession["bid"][bidder] then
+          SendResponse("You already have a DKP bid for " .. item .. ". Use '[item-link] cancel' to cancel your current bid first.", bidder)
           return
         end
+        -- Clear other non-DKP bids when placing STOCK bid
+        if itemSession["ms"] then itemSession["ms"][bidder] = nil end
+        if itemSession["os"] then itemSession["os"][bidder] = nil end
+        if itemSession["tmog"] then itemSession["tmog"][bidder] = nil end
+        
         itemSession["stock"][bidder] = 1
         roll[bidder] = roll[bidder] or -1
         received = PlayerWithClassColor(bidder) .. " bid Stock for " .. item .. AppendNote(notes[bidder] or "")
+
       elseif tier == "cancel" then
         cancel[bidder] = true
         received = PlayerWithClassColor(bidder) .. " cancelled their bid for " .. item

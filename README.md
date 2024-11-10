@@ -1,4 +1,12 @@
 # Overview and Goals
+Extended from the original [ChatLootBidder](https://github.com/trumpetx/ChatLootBidder) addon, this version is designed to have no distinction between MS and OS for bidding, and implements TMOG and STOCK rolling options.
+
+In DKP mode, players will be able to whisper "bid" to use DKP, and can also whisper "ms", "os", "tmog", or "stock" to roll without using DKP.  The priority is bid > ms > os > stock, with tmog being rolled along-side any of the other options.  The master looter can give the item to a TMOG winner, who can then trade it to the main winner.
+
+In MSOS mode, the same rules apply, there just isn't a bid option.
+
+--------------------------------
+
 This addon's primary goal is to manage the process of bidding and rolling on items in a Master Looter environment in a semi-automated way.  This addon is for Master Looters.  If you are a bidder/raider, you should check out the [NotChatLootBidder](https://github.com/trumpetx/NotChatLootBidder) addon.
 
 __Goals:__
