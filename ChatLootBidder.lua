@@ -409,16 +409,6 @@ local function BidSummary(item, announceWinners)
   local cancel = itemSession["cancel"] or {}
   local notes = itemSession["notes"] or {}
 
-  -- Add separator before any rolls
-  if announceWinners and (
-    (not IsTableEmpty(itemSession["ms"])) or 
-    (not IsTableEmpty(itemSession["os"])) or 
-    (not IsTableEmpty(itemSession["tmog"])) or 
-    (not IsTableEmpty(itemSession["stock"]))
-  ) then
-    MessageStartChannel("---------------")
-  end
-
   -- Process main bids first
   header = true
   if sessionMode == "DKP" then
@@ -552,9 +542,6 @@ local function BidSummary(item, announceWinners)
         MessageBidChannel(PlayerWithClassColor(bidder) .. " rolls " .. itemSession["roll"][bidder] .. " for " .. item .. " for TMOG")
       end
     end
-
-    -- Add separator before any rolls
-    MessageStartChannel("---------------")
     
     -- Find highest roller(s)
     local highestRoll = 0
@@ -573,7 +560,14 @@ local function BidSummary(item, announceWinners)
     
     if not IsTableEmpty(tmogWinners) then
       if announceWinners then
-        local winnerMessage = table.concat(tmogWinners, ", ") .. (getn(tmogWinners) > 1 and " tie for " or " wins ") .. item .. " for TMOG with a roll of " .. highestRoll
+        -- Create a new table to hold the class-colored tmog winners
+        local coloredTmogWinners = {}
+        for _, winner in ipairs(tmogWinners) do
+            table.insert(coloredTmogWinners, PlayerWithClassColor(winner))  -- Wrap each tmogWinner in PlayerWithClassColor
+        end
+
+        -- Construct the winner message using the colored tmog winners
+        local winnerMessage = "+++ " .. table.concat(coloredTmogWinners, ", ") .. (getn(tmogWinners) > 1 and " tie for " or " wins ") .. item .. " for TMOG with a roll of " .. highestRoll
         MessageWinnerChannel(winnerMessage)
       end
     end
@@ -613,7 +607,14 @@ local function BidSummary(item, announceWinners)
 
       if not IsTableEmpty(stockBidders) then
         if announceWinners then
-          local winnerMessage = table.concat(stockBidders, ", ") .. (getn(stockBidders) > 1 and " tie for " or " wins ") .. item .. " for STOCK with a roll of " .. highestRoll
+          -- Create a new table to hold the class-colored stock bidders
+          local coloredStockBidders = {}
+          for _, bidder in ipairs(stockBidders) do
+              table.insert(coloredStockBidders, PlayerWithClassColor(bidder))  -- Wrap each stockBidder in PlayerWithClassColor
+          end
+
+          -- Construct the winner message using the colored stock bidders
+          local winnerMessage = ">>> " .. table.concat(coloredStockBidders, ", ") .. (getn(stockBidders) > 1 and " tie for " or " wins ") .. item .. " for STOCK with a roll of " .. highestRoll
           MessageWinnerChannel(winnerMessage)
         end
       end
@@ -625,7 +626,14 @@ local function BidSummary(item, announceWinners)
     if announceWinners then MessageStartChannel("No bids received for " .. item) end
     table.insert(summary, item .. ": No Bids")
   elseif announceWinners and not IsTableEmpty(mainWinner) then
-    local winnerMessage = table.concat(mainWinner, ", ") .. (getn(mainWinner) > 1 and " tie for " or " wins ") .. item
+    -- Create a new table to hold the class-colored winners
+    local coloredWinners = {}
+    for _, winner in ipairs(mainWinner) do
+        table.insert(coloredWinners, PlayerWithClassColor(winner))  -- Wrap each winner in PlayerWithClassColor
+    end
+
+    -- Construct the winner message using the colored winners
+    local winnerMessage = ">>> " .. table.concat(coloredWinners, ", ") .. (getn(mainWinner) > 1 and " tie for " or " wins ") .. item
     if sessionMode == "DKP" and mainWinnerTier == "bid" then
       winnerMessage = winnerMessage .. " with a bid of " .. mainWinnerBid .. " DKP"
     else
@@ -699,8 +707,7 @@ function ChatLootBidder:Start(items, timer, mode)
   end
   local srs = mode == "MSOS" and softReserveSessionName ~= nil and ChatLootBidder_Store.SoftReserveSessions[softReserveSessionName] or {}
   local startChannelMessage = {}
-  table.insert(startChannelMessage, "Bid on the following items")
-  table.insert(startChannelMessage, "-----------")
+  table.insert(startChannelMessage, "Bid on the following items:")
   local bidAddonMessage = "mode=" .. mode .. ",items="
   local exampleItem
   for k,i in pairs(items) do
@@ -710,7 +717,7 @@ function ChatLootBidder:Start(items, timer, mode)
     session[i] = {}
     if srLen == 0 then
       exampleItem = i
-      table.insert(startChannelMessage, i)
+      table.insert(startChannelMessage, "> " .. i)
       bidAddonMessage = bidAddonMessage .. string.gsub(i, ",", "~~~")
       if sessionMode == "DKP" then
         session[i]["bid"] = {}  -- Initialize bid table for DKP mode
@@ -740,13 +747,12 @@ function ChatLootBidder:Start(items, timer, mode)
       end
     end
   end
-  table.insert(startChannelMessage, "-----------")
   if exampleItem then
     if mode == "DKP" then
-      table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " bid [dkp-amount]")
-      table.insert(startChannelMessage, "or")
+      table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " bid [dkp-amount]/ms/os/tmog/stock")
+    else
+      table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " ms/os/tmog/stock")
     end
-    table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " ms/os/tmog/stock")
     local l
     for _, l in pairs(startChannelMessage) do
       MessageStartChannel(l)
@@ -953,6 +959,7 @@ end
 
 local InitSlashCommands = function()
 	SLASH_ChatLootBidder1, SLASH_ChatLootBidder2 = "/l", "/loot"
+  SLASH_ChatLootBidderShort1 = "/ls"
 	SlashCmdList["ChatLootBidder"] = function(message)
 		local commandlist = SplitBySpace(message)
     if commandlist[1] == nil then
@@ -1024,6 +1031,12 @@ local InitSlashCommands = function()
       local optionalTimer = ToWholeNumber(commandlist[getn(commandlist)], -1)
       ChatLootBidder:Start(itemLinks, optionalTimer)
 		end
+  end
+  SlashCmdList["ChatLootBidderShort"] = function(message)
+    local commandlist = SplitBySpace(message)
+    local itemLinks = GetItemLinks(message)
+    local optionalTimer = ToWholeNumber(commandlist[getn(commandlist)], -1)
+    ChatLootBidder:Start(itemLinks, optionalTimer)
   end
 end
 
