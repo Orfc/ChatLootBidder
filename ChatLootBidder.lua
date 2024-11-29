@@ -621,9 +621,11 @@ local function BidSummary(item, announceWinners)
     end
   end
 
-  -- Only announce "No bids" if there were no bids of any type
+  -- Only announce "No bids" if there were no bids of any type and no soft reserves
   if IsTableEmpty(mainWinner) and IsTableEmpty(itemSession["tmog"]) and IsTableEmpty(itemSession["stock"]) then
-    if announceWinners then MessageStartChannel("No bids received for " .. item) end
+    if announceWinners and IsTableEmpty(itemSession["sr"]) then  -- Check if there are no soft reserves
+      MessageStartChannel("No bids received for " .. item)
+    end
     table.insert(summary, item .. ": No Bids")
   elseif announceWinners and not IsTableEmpty(mainWinner) then
     -- Create a new table to hold the class-colored winners
@@ -733,17 +735,22 @@ function ChatLootBidder:Start(items, timer, mode)
       session[i]["cancel"] = {}
       session[i]["notes"] = {}
     else
-      table.insert(startChannelMessage, i .. " SR (" .. srLen .. ")")
       session[i]["sr"] = {}
       session[i]["roll"] = {}
-      for _,sr in pairs(srsOnItem) do
+      
+      -- Collect soft reserves and prepare to send a message
+      local playersWithSR = {}  -- Table to hold players with soft reserves
+      for _, sr in pairs(srsOnItem) do
         session[i]["sr"][sr] = 1
         session[i]["roll"][sr] = -1
-        if srLen > 1 then
-          SendResponse("Your Soft Reserve for " .. i .. " is contested by " .. (srLen-1) .. " other player" .. (srLen == 2 and "" or "s") .. ". '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session.", sr)
-        else
-          SendResponse("You won " .. i .. " with your Soft Reserve!", srsOnItem[1])
-        end
+        table.insert(playersWithSR, sr)  -- Add each player to the list
+      end
+      
+      -- Send the message only once after processing all soft reserves
+      if srLen > 1 then
+        MessageBidChannel(i .. " is soft reserved by: " .. table.concat(playersWithSR, ", ") .. ". '/roll' now!")
+      else
+        MessageBidChannel(playersWithSR[1] .. " won " .. i .. " with a soft reserve!")
       end
     end
   end
