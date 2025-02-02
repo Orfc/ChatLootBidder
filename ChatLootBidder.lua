@@ -359,6 +359,23 @@ local function realAmt(amt, real)
   return amt
 end
 
+local function GetCurrentHighestBid()
+  local highestBid = 0
+  for _, itemSession in pairs(session) do
+      for _, bid in pairs(itemSession["ms"]) do
+          if bid > highestBid then
+              highestBid = bid
+          end
+      end
+      for _, bid in pairs(itemSession["os"]) do
+          if bid > highestBid then
+              highestBid = bid
+          end
+      end
+  end
+  return highestBid
+end
+
 local function BidSummary(announceWinners)
   if session == nil then
     Error("There is no existing session")
@@ -392,6 +409,7 @@ local function BidSummary(announceWinners)
     local winnerTier = nil
     local header = true
     local summary = {}
+    local highestBid = 0
     if not IsTableEmpty(sr) then
       local sortedMainspecKeys = GetKeysSortedByValue(sr)
       for k,bidder in pairs(sortedMainspecKeys) do
@@ -404,44 +422,69 @@ local function BidSummary(announceWinners)
       end
     end
     header = true
-    if not IsTableEmpty(ms) then
-      local sortedMainspecKeys = GetKeysSortedByValue(ms)
-      for k,bidder in pairs(sortedMainspecKeys) do
-        if cancel[bidder] == nil then
-          if IsTableEmpty(winner) then table.insert(summary, item) end
-          if header then table.insert(summary, "- Main Spec:"); header = false end
-          local bid = ms[bidder]
-          if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "ms"
-          elseif not IsTableEmpty(winner) and winnerTier == "ms" and winnerBid == bid then table.insert(winner, bidder) end
-          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. realAmt(bid, real[bidder]) .. AppendNote(notes[bidder]))
+    if sessionMode == "DKP" then
+      highestBid = GetCurrentHighestBid()
+    end
+    if highestBid > 0 then
+    local combinedBids = {}
+    local combinedBidsType = {}
+      for bidder, bid in pairs(ms) do
+        combinedBids[bidder] = bid
+        combinedBidsType[bidder] = 'ms'
+      end
+      for bidder, bid in pairs(ofs) do
+        combinedBids[bidder] = bid
+        combinedBidsType[bidder] = 'os'
+      end
+      local sortedCombinedKeys = GetKeysSortedByValue(combinedBids)
+      for k,bidder in pairs(sortedCombinedKeys) do
+        if IsTableEmpty(winner) then table.insert(summary, item) end
+        if header then table.insert(summary, "- Combined Bids:"); header = false end
+        local bid = combinedBids[bidder]
+        if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = combinedBidsType[bidder]
+        elseif not IsTableEmpty(winner) and winnerTier == "combined" and winnerBid == bid then table.insert(winner, bidder) end
+        table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. realAmt(bid, real[bidder]) .. AppendNote(notes[bidder]))
+      end
+    else
+      if not IsTableEmpty(ms) then
+        local sortedMainspecKeys = GetKeysSortedByValue(ms)
+        for k,bidder in pairs(sortedMainspecKeys) do
+          if cancel[bidder] == nil then
+            if IsTableEmpty(winner) then table.insert(summary, item) end
+            if header then table.insert(summary, "- Main Spec:"); header = false end
+            local bid = ms[bidder]
+            if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "ms"
+            elseif not IsTableEmpty(winner) and winnerTier == "ms" and winnerBid == bid then table.insert(winner, bidder) end
+            table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. realAmt(bid, real[bidder]) .. AppendNote(notes[bidder]))
+          end
         end
       end
-    end
-    header = true
-    if not IsTableEmpty(ofs) then
-      local sortedOffspecKeys = GetKeysSortedByValue(ofs)
-      for k,bidder in pairs(sortedOffspecKeys) do
-        if cancel[bidder] == nil and ms[bidder] == nil then
-          if IsTableEmpty(winner) then table.insert(summary, item) end
-          if header then table.insert(summary, "- Off Spec:"); header = false end
-          local bid = ofs[bidder]
-          if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "os"
-          elseif not IsTableEmpty(winner) and winnerTier == "os" and winnerBid == bid then table.insert(winner, bidder) end
-          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. realAmt(bid, real[bidder]) .. AppendNote(notes[bidder]))
+      header = true
+      if not IsTableEmpty(ofs) then
+        local sortedOffspecKeys = GetKeysSortedByValue(ofs)
+        for k,bidder in pairs(sortedOffspecKeys) do
+          if cancel[bidder] == nil and ms[bidder] == nil then
+            if IsTableEmpty(winner) then table.insert(summary, item) end
+            if header then table.insert(summary, "- Off Spec:"); header = false end
+            local bid = ofs[bidder]
+            if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "os"
+            elseif not IsTableEmpty(winner) and winnerTier == "os" and winnerBid == bid then table.insert(winner, bidder) end
+            table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. realAmt(bid, real[bidder]) .. AppendNote(notes[bidder]))
+          end
         end
       end
-    end
-    header = true
-    if not IsTableEmpty(roll) then
-      local sortedRollKeys = GetKeysSortedByValue(roll)
-      for k,bidder in pairs(sortedRollKeys) do
-        if cancel[bidder] == nil and ms[bidder] == nil and ofs[bidder] == nil then
-          if IsTableEmpty(winner) then table.insert(summary, item) end
-          if header then table.insert(summary, "- Rolls:"); header = false end
-          local bid = roll[bidder]
-          if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "roll"
-          elseif not IsTableEmpty(winner) and winnerTier == "roll" and winnerBid == bid then table.insert(winner, bidder) end
-          table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. bid .. AppendNote(notes[bidder]))
+      header = true
+      if not IsTableEmpty(roll) then
+        local sortedRollKeys = GetKeysSortedByValue(roll)
+        for k,bidder in pairs(sortedRollKeys) do
+          if cancel[bidder] == nil and ms[bidder] == nil and ofs[bidder] == nil then
+            if IsTableEmpty(winner) then table.insert(summary, item) end
+            if header then table.insert(summary, "- Rolls:"); header = false end
+            local bid = roll[bidder]
+            if IsTableEmpty(winner) then table.insert(winner, bidder); winnerBid = bid; winnerTier = "roll"
+            elseif not IsTableEmpty(winner) and winnerTier == "roll" and winnerBid == bid then table.insert(winner, bidder) end
+            table.insert(summary, "-- " .. PlayerWithClassColor(bidder) .. ": " .. bid .. AppendNote(notes[bidder]))
+          end
         end
       end
     end
@@ -480,7 +523,7 @@ local function BidSummary(announceWinners)
       if announceWinners then MessageStartChannel("No bids received for " .. item) end
       table.insert(summary, item .. ": No Bids")
     elseif announceWinners then
-      local winnerMessage = table.concat(winner, ", ") .. (getn(winner) > 1 and " tie for " or " wins ") .. item
+      local winnerMessage = ">>> " .. table.concat(winner, ", ") .. (getn(winner) > 1 and " tie for " or " wins ") .. item
       if sessionMode == "DKP" then
         winnerMessage = winnerMessage .. " with a " .. (winnerTier == "roll" and "roll of " or (string.upper(winnerTier) .. " bid of "))
         if getn(winner) == 1 and winnerTier ~= "roll" then
@@ -587,7 +630,7 @@ function ChatLootBidder:Start(items, timer, mode)
   end
   table.insert(startChannelMessage, "-----------")
   if exampleItem then
-    table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " ms/os/roll" .. (mode == "DKP" and " #bid" or "") .. " [optional-note]")
+    table.insert(startChannelMessage, "/w " .. PlayerWithClassColor(me) .. " " .. exampleItem .. " ms/os" .. (mode == "DKP" and " [bid_amt]" or ""))
     local l
     for _, l in pairs(startChannelMessage) do
       MessageStartChannel(l)
@@ -794,6 +837,7 @@ end
 
 local InitSlashCommands = function()
 	SLASH_ChatLootBidder1, SLASH_ChatLootBidder2 = "/l", "/loot"
+  SLASH_ChatLootBidderShort1 = "/ls"
 	SlashCmdList["ChatLootBidder"] = function(message)
 		local commandlist = SplitBySpace(message)
     if commandlist[1] == nil then
@@ -866,6 +910,12 @@ local InitSlashCommands = function()
       ChatLootBidder:Start(itemLinks, optionalTimer)
 		end
   end
+  SlashCmdList["ChatLootBidderShort"] = function(message)
+    local commandlist = SplitBySpace(message)
+    local itemLinks = GetItemLinks(message)
+    local optionalTimer = ToWholeNumber(commandlist[getn(commandlist)], -1)
+    ChatLootBidder:Start(itemLinks, optionalTimer)
+  end
 end
 
 local function LoadText()
@@ -896,12 +946,12 @@ local function LoadValues()
 end
 
 local function IsValidTier(tier)
-  return tier == "ms" or tier == "os" or tier == "roll" or tier == "cancel"
+  return tier == "ms" or tier == "os" or tier == "cancel"
 end
 
 local function InvalidBidSyntax(item)
   local bidExample = " " .. (ChatLootBidder_Store.MinBid + 9)
-  return "Invalid bid syntax for " .. item .. ".  The proper format is: '[item-link] ms" .. (sessionMode == "DKP" and bidExample or "") .. "' or '[item-link] os" .. (sessionMode == "DKP" and bidExample or "") .. "' or '[item-link] roll'"
+  return "Invalid bid syntax for " .. item .. ".  The proper format is: '[item-link] ms" .. (sessionMode == "DKP" and bidExample or "") .. "' or '[item-link] os" .. (sessionMode == "DKP" and bidExample or "") .. "'"
 end
 
 local function of(amt, real)
@@ -1036,6 +1086,12 @@ function ChatFrame_OnEvent(event)
 
     if IsValidTier(tier) then
       amt = ToWholeNumber(amt)
+
+      -- Round up to the nearest multiple of 10
+      if amt > 0 then
+        amt = math.ceil(amt / 10) * 10
+      end
+
     elseif IsValidTier(amt) then
       -- The bidder mixed up the ms ## to ## ms, handle the mixup
       local oldTier = tier
@@ -1063,16 +1119,12 @@ function ChatFrame_OnEvent(event)
     end
     -- If they had previously canceled, remove them and allow the new bid to continue
     cancel[bidder] = nil
-    if tier == "roll" then
-      if roll[bidder] ~= nil and roll[bidder] ~= -1 then
-        SendResponse("Your roll of " .. roll[bidder] .. " has already been recorded", bidder)
-        return
-      end
-    elseif sessionMode == "DKP" then
-      if amt < ChatLootBidder_Store.MinBid then
-        SendResponse(InvalidBidSyntax(item), bidder)
-        return
-      end
+    -- if tier == "roll" then
+    --   if roll[bidder] ~= nil and roll[bidder] ~= -1 then
+    --     SendResponse("Your roll of " .. roll[bidder] .. " has already been recorded", bidder)
+    --     return
+    --   end
+    if sessionMode == "DKP" then
       -- remove amount from the table for note concat
       table.remove(bid, 2)
     else
@@ -1089,23 +1141,38 @@ function ChatFrame_OnEvent(event)
     end
     notes[bidder] = note
     local received
+    local highestBid
     if tier == "ms" then
+      if sessionMode == "DKP" then
+        highestBid = GetCurrentHighestBid()
+        if amt > 0 and amt <= highestBid then
+          SendResponse("Your bid must be higher than the current highest bid of " .. highestBid .. ".", bidder)
+          return
+        end
+      end
       mainSpec[bidder] = amt
       if sessionMode == "MSOS" then roll[bidder] = roll[bidder] or -1 end
-      received = "Main Spec bid" .. of(amt, real[bidder]) .. " received for " .. item .. AppendNote(note)
+      received = "Main Spec bid" .. of(amt, real[bidder]) .. " received for " .. item
     elseif mainSpec[bidder] ~= nil then
       SendResponse("You already have a MS bid" .. of(mainSpec[bidder], real[bidder]) .. " recorded. Use '[item-link] cancel' to cancel your current MS bid.", bidder)
       return
     elseif tier == "os" then
+      if sessionMode == "DKP" then
+        highestBid = GetCurrentHighestBid()
+        if amt > 0 and amt <= highestBid then
+          SendResponse("Your bid must be higher than the current highest bid of " .. highestBid .. ".", bidder)
+          return
+        end
+      end
       offSpec[bidder] = amt
       if sessionMode == "MSOS" then roll[bidder] = roll[bidder] or -1 end
-      received = "Off Spec bid" .. of(amt, real[bidder]) .. " received for " .. item .. AppendNote(note)
+      received = "Off Spec bid" .. of(amt, real[bidder]) .. " received for " .. item
     elseif offSpec[bidder] ~= nil then
       SendResponse("You already have an OS bid" .. of(offSpec[bidder], real[bidder]) .. " recorded. Use '[item-link] cancel' to cancel your current MS bid.", bidder)
       return
-    elseif tier == "roll" then
-      roll[bidder] = -1
-      received = "Your roll bid for " .. item .. " has been received" .. AppendNote(note) .. ".  '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session."
+    -- elseif tier == "roll" then
+    --   roll[bidder] = -1
+    --   received = "Your roll bid for " .. item .. " has been received" .. AppendNote(note) .. ".  '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session."
     end
     MessageBidChannel("<" .. PlayerWithClassColor(bidder) .. "> " .. tier .. ((sessionMode == "MSOS" or amt == nil or tier == "roll") and "" or (" " .. realAmt(amt, real[bidder]))) .. " " .. item)
     SendResponse(received, bidder)
@@ -1175,30 +1242,30 @@ function ChatLootBidder:Stage(i, force)
 end
 
 function ChatLootBidder.CHAT_MSG_SYSTEM(msg)
-  if session == nil then return end
-  local _, _, name, roll, low, high = string.find(msg, rollRegex)
-	if name then
-    if tonumber(low) > 1 or tonumber(high) > 100 then return end -- invalid roll
-    if name == me and tonumber(high) <= 40 then return end -- master looter using pfUI's random loot distribution
-    local existingWhy = ""
-    for item,itemSession in pairs(session) do
-      local existingRoll = itemSession["roll"][name]
-      if existingRoll == -1 or ((1 == getn(GetKeys(session))) and existingRoll == nil) then
-        itemSession["roll"][name] = tonumber(roll)
-        SendResponse("Your roll of " .. roll .. " been recorded for " .. item, name)
-        return
-      elseif (existingRoll or 0) > 0 then
-        existingWhy = existingWhy .. "Your roll of " .. existingRoll .. " has already been recorded for " .. item .. ". "
-      end
-    end
-    if string.len(existingWhy) > 0 then
-      SendResponse("Ignoring your roll of " .. roll .. ". " .. existingWhy, name)
-    elseif sessionMode == "DKP" then
-      SendResponse("Ignoring your roll of " .. roll .. ". You must first declare that you are rolling on an item first: '/w " .. me .. " [item-link] roll'", name)
-    else
-      SendResponse("Ignoring your roll of " .. roll .. ". You must bid on an item before rolling on it: '/w " .. me .. " [item-link] ms/os/roll'", name)
-    end
-	end
+  -- if session == nil then return end
+  -- local _, _, name, roll, low, high = string.find(msg, rollRegex)
+	-- if name then
+  --   if tonumber(low) > 1 or tonumber(high) > 100 then return end -- invalid roll
+  --   if name == me and tonumber(high) <= 40 then return end -- master looter using pfUI's random loot distribution
+  --   local existingWhy = ""
+  --   for item,itemSession in pairs(session) do
+  --     local existingRoll = itemSession["roll"][name]
+  --     if existingRoll == -1 or ((1 == getn(GetKeys(session))) and existingRoll == nil) then
+  --       itemSession["roll"][name] = tonumber(roll)
+  --       SendResponse("Your roll of " .. roll .. " been recorded for " .. item, name)
+  --       return
+  --     elseif (existingRoll or 0) > 0 then
+  --       existingWhy = existingWhy .. "Your roll of " .. existingRoll .. " has already been recorded for " .. item .. ". "
+  --     end
+  --   end
+  --   if string.len(existingWhy) > 0 then
+  --     SendResponse("Ignoring your roll of " .. roll .. ". " .. existingWhy, name)
+  -- elseif sessionMode == "DKP" then
+  --     SendResponse("Ignoring your roll of " .. roll .. ". You must first declare that you are rolling on an item first: '/w " .. me .. " [item-link] roll'", name)
+  --   else
+  --     SendResponse("Ignoring your roll of " .. roll .. ". You must bid on an item before rolling on it: '/w " .. me .. " [item-link] ms/os/roll'", name)
+  --   end
+	-- end
 end
 
 function ChatLootBidder.ADDON_LOADED()
@@ -1211,9 +1278,9 @@ function ChatLootBidder.ADDON_LOADED()
 end
 
 function ChatLootBidder.CHAT_MSG_ADDON(addonTag, stringMessage, channel, sender)
-  if VersionUtil:CHAT_MSG_ADDON(addonName, function(ver)
-    Message("New version " .. ver .. " of " .. addonTitle .. " is available! Upgrade now at " .. addonNotes)
-  end) then return end
+  -- if VersionUtil:CHAT_MSG_ADDON(addonName, function(ver)
+  --   Message("New version " .. ver .. " of " .. addonTitle .. " is available! Upgrade now at " .. addonNotes)
+  -- end) then return end
 end
 
 function ChatLootBidder.PARTY_MEMBERS_CHANGED()
@@ -1246,7 +1313,6 @@ function ChatLootBidder.LOOT_OPENED()
   end
   ChatLootBidder:RedrawStage()
 end
-
 
 -- [00:00]Autozhot: Autozhot - Band of Accuria
 local function ParseRaidResFly(text)
