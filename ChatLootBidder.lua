@@ -573,7 +573,7 @@ end
 
 function ChatLootBidder:Start(items, timer, mode)
   if not IsRaidAssistant(me) then Error("You must be a raid leader or assistant in a raid to start a loot session"); return end
-  if not IsMasterLooterSet() then Error("Master Looter must be set to start a loot session"); return end
+  -- if not IsMasterLooterSet() then Error("Master Looter must be set to start a loot session"); return end
   local mode = mode ~= nil and mode or ChatLootBidder_Store.DefaultSessionMode
   if session ~= nil then ChatLootBidder:End() end
   local stageList = GetKeysWhere(stage, function(k,v) return v == true end)
