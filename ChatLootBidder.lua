@@ -45,6 +45,7 @@ local function LoadVariables()
   ChatLootBidder_Store.RollAnnounce = DefaultTrue(ChatLootBidder_Store.RollAnnounce)
   ChatLootBidder_Store.AutoStage = DefaultTrue(ChatLootBidder_Store.AutoStage)
   ChatLootBidder_Store.BidAnnounce = DefaultFalse(ChatLootBidder_Store.BidAnnounce)
+  ChatLootBidder_Store.DisableWhispers = DefaultFalse(ChatLootBidder_Store.DisableWhispers)
   ChatLootBidder_Store.BidSummary = DefaultFalse(ChatLootBidder_Store.BidSummary)
   ChatLootBidder_Store.BidChannel = ChatLootBidder_Store.BidChannel or "OFFICER"
   ChatLootBidder_Store.SessionAnnounceChannel = ChatLootBidder_Store.SessionAnnounceChannel or "RAID"
@@ -621,9 +622,13 @@ function ChatLootBidder:Start(items, timer, mode)
         session[i]["sr"][sr] = 1
         session[i]["roll"][sr] = -1
         if srLen > 1 then
-          SendResponse("Your Soft Reserve for " .. i .. " is contested by " .. (srLen-1) .. " other player" .. (srLen == 2 and "" or "s") .. ". '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session.", sr)
+          if not ChatLootBidder_Store.DisableWhispers then
+            SendResponse("Your Soft Reserve for " .. i .. " is contested by " .. (srLen-1) .. " other player" .. (srLen == 2 and "" or "s") .. ". '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session.", sr)
+          end
         else
-          SendResponse("You won " .. i .. " with your Soft Reserve!", srsOnItem[1])
+          if not ChatLootBidder_Store.DisableWhispers then
+            SendResponse("You won " .. i .. " with your Soft Reserve!", srsOnItem[1])
+          end
         end
       end
     end
@@ -1175,7 +1180,9 @@ function ChatFrame_OnEvent(event)
     --   received = "Your roll bid for " .. item .. " has been received" .. AppendNote(note) .. ".  '/random' now to record your own roll or do nothing for the addon to roll for you at the end of the session."
     end
     MessageBidChannel("<" .. PlayerWithClassColor(bidder) .. "> " .. tier .. ((sessionMode == "MSOS" or amt == nil or tier == "roll") and "" or (" " .. realAmt(amt, real[bidder]))) .. " " .. item)
-    SendResponse(received, bidder)
+    if not ChatLootBidder_Store.DisableWhispers then
+      SendResponse(received, bidder)
+    end
     return
   else
     ChatLootBidder_ChatFrame_OnEvent(event)

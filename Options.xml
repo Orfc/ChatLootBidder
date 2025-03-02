@@ -343,6 +343,15 @@
           </OnLoad>
         </Scripts>
       </Frame>
+      <CheckButton name="$parentDisableWhispers" inherits="MyOptionsCheckButtonTemplate">
+        <Anchors>
+          <Anchor point="TOPLEFT">
+            <Offset>
+              <AbsDimension x="20" y="-445" />
+            </Offset>
+          </Anchor>
+        </Anchors>
+      </CheckButton>
 
       <!-- SR Mode -->
       <Slider name="$parentDefaultMaxSoftReserves" orientation="HORIZONTAL" enableMouse="true" valueStep="1" minValue="1" maxValue="5" inherits="OptionsSliderTemplate">
